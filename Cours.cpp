@@ -28,11 +28,19 @@ std::string classifyContour(const std::vector<cv::Point>& contour) {
     return "unknown";
 }
 
-int main() {
+int main(int argc, char* argv[]) {
+    // Проверяем, передано ли имя файла
+    if (argc < 2) {
+        std::cout << "Использование: " << argv[0] << " <путь_к_изображению>" << std::endl;
+        return -1;
+    }
+
+    std::string filename = argv[1]; // Имя файла — первый аргумент
+
     // Загружаем исходное изображение
-    cv::Mat img_full = cv::imread("rocket-3.jpg");
+    cv::Mat img_full = cv::imread(filename);
     if (img_full.empty()) {
-        std::cout << "Не удалось загрузить изображение" << std::endl;
+        std::cout << "Не удалось загрузить изображение: " << filename << std::endl;
         return -1;
     }
 
@@ -72,7 +80,7 @@ int main() {
         std::string name = classifyContour(contours[maxIdx]);
         cv::drawContours(img, contours, maxIdx, cv::Scalar(0, 255, 0), 2);
 
-        // Надпись в левом верхнем углу — всегда видна
+        // Надпись в левом верхнем углу
         cv::putText(img, name, cv::Point(10, 30),
             cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 0, 255), 2);
         std::cout << "Объект распознан как: " << name << std::endl;
