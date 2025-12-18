@@ -4,89 +4,94 @@
 #include <string>
 
 std::string classifyContour(const std::vector<cv::Point>& contour) {
-    double area = cv::contourArea(contour);
-    double peri = cv::arcLength(contour, true);
-    double approxAccuracy = 0.02 * peri;
-    std::vector<cv::Point> approx;
-    cv::approxPolyDP(contour, approx, approxAccuracy, true);
-    int vertices = (int)approx.size();
+    double contourArea = cv::contourArea(contour);
+    double perimeter = cv::arcLength(contour, true);
+    double approximationAccuracy = 0.02 * perimeter;
+    // Аппроксимируем контур ломаной линией
+    std::vector<cv::Point> approximatedContour;
+    cv::approxPolyDP(contour, approximatedContour, approximationAccuracy, true);
+    // Считаем количество вершин у аппроксимированного контура
+    int vertexCount = static_cast<int>(approximatedContour.size());
+    cv::Rect boundingBox = cv::boundingRect(contour);
+    double width = static_cast<double>(boundingBox.width);
+    double height = static_cast<double>(boundingBox.height);
+    double aspectRatio = width / height;
 
-    cv::Rect boundingRect = cv::boundingRect(contour);
-    double rect_width = boundingRect.width;
-    double rect_height = boundingRect.height;
-    double aspect_ratio = rect_width / rect_height;
-
-    if (vertices >= 8) {
+    // Если вершин много — скорее всего, это танк (округлая форма с деталями)
+    if (vertexCount >= 8) {
         return "tank";
     }
-    if (aspect_ratio < 0.4) {
+    // Очень узкий и высокий объект — похож на ракету
+    if (aspectRatio < 0.4) {
         return "rocket";
     }
-    if (1.0 / aspect_ratio < 0.4) { // т.е. aspect_ratio > 2.5
+    // Очень широкий и низкий объект — похож на машину
+    if (aspectRatio > 2.5) {
         return "car";
     }
+    // Если ни один признак не подошёл — неизвестный объект
     return "unknown";
 }
 
 int main(int argc, char* argv[]) {
-    // Проверяем, передано ли имя файла
     if (argc < 2) {
         std::cout << "Использование: " << argv[0] << " <путь_к_изображению>" << std::endl;
         return -1;
     }
 
-    std::string filename = argv[1]; // Имя файла — первый аргумент
-
-    // Загружаем исходное изображение
-    cv::Mat img_full = cv::imread(filename);
-    if (img_full.empty()) {
-        std::cout << "Не удалось загрузить изображение: " << filename << std::endl;
+    
+    std::string imagePath = argv[1];
+    // Загружаю изображение с диска
+    cv::Mat originalImage = cv::imread(imagePath);
+    if (originalImage.empty()) {
+        std::cout << "Не удалось загрузить изображение: " << imagePath << std::endl;
         return -1;
     }
 
-    // Уменьшаем изображение (сохраняя пропорции)
+    // Уменьшаем изображение до ширины (640 пикселей), сохраняя пропорции
     const int TARGET_WIDTH = 640;
-    double scale = (double)TARGET_WIDTH / img_full.cols;
-    cv::Mat img;
-    cv::resize(img_full, img, cv::Size(), scale, scale, cv::INTER_AREA);
+    double scaleFactor = static_cast<double>(TARGET_WIDTH) / originalImage.cols;
+    cv::Mat resizedImage;
+    cv::resize(originalImage, resizedImage, cv::Size(), scaleFactor, scaleFactor, cv::INTER_AREA);
 
-    // Преобразуем в оттенки серого и бинаризуем
-    cv::Mat gray, bin;
-    cv::cvtColor(img, gray, cv::COLOR_BGR2GRAY);
-    cv::threshold(gray, bin, 240, 255, cv::THRESH_BINARY_INV);
+    cv::Mat grayscaleImage;
+    cv::cvtColor(resizedImage, grayscaleImage, cv::COLOR_BGR2GRAY);
+    // Бинаризуем: делаем чёрно-белое изображение (инвертированное — объекты белые на чёрном фоне)
+    cv::Mat binaryImage;
+    cv::threshold(grayscaleImage, binaryImage, 240, 255, cv::THRESH_BINARY_INV);
 
-    // Находим внешние контуры
-    std::vector<std::vector<cv::Point>> contours;
-    cv::findContours(bin, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+    // Находим все внешние контуры на бинарном изображении. Если их нет, то завершаем
+    std::vector<std::vector<cv::Point>> foundContours;
+    cv::findContours(binaryImage, foundContours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
-    if (contours.empty()) {
+    if (foundContours.empty()) {
         std::cout << "Контуры не найдены" << std::endl;
         return 0;
     }
 
-    // Находим контур с наибольшей площадью
-    double maxArea = 0;
-    int maxIdx = -1;
-    for (size_t i = 0; i < contours.size(); ++i) {
-        double a = cv::contourArea(contours[i]);
-        if (a > maxArea) {
-            maxArea = a;
-            maxIdx = (int)i;
+    // Ищем самый большой контур (по площади)
+    double largestArea = 0.0;
+    int largestContourIndex = -1;
+    for (size_t i = 0; i < foundContours.size(); ++i) {
+        double currentArea = cv::contourArea(foundContours[i]);
+        if (currentArea > largestArea) {
+            largestArea = currentArea;
+            largestContourIndex = static_cast<int>(i);
         }
     }
 
-    // Распознаём и отображаем результат
-    if (maxIdx != -1) {
-        std::string name = classifyContour(contours[maxIdx]);
-        cv::drawContours(img, contours, maxIdx, cv::Scalar(0, 255, 0), 2);
+    // Если нашли подходящий контур — определяем его тип и рисуем на изображении
+    if (largestContourIndex != -1) {
+        std::string objectClass = classifyContour(foundContours[largestContourIndex]);
+        cv::drawContours(resizedImage, foundContours, largestContourIndex, cv::Scalar(0, 255, 0), 2);
 
-        // Надпись в левом верхнем углу
-        cv::putText(img, name, cv::Point(10, 30),
+        // Выводим название объекта в левом верхнем углу изображения
+        cv::putText(resizedImage, objectClass, cv::Point(10, 30),
             cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 0, 255), 2);
-        std::cout << "Объект распознан как: " << name << std::endl;
+        std::cout << "Объект распознан как: " << objectClass << std::endl;
     }
 
-    cv::imshow("Результат", img);
+    cv::imshow("Результат", resizedImage);
     cv::waitKey(0);
     cv::destroyAllWindows();
     return 0;
